@@ -63,7 +63,8 @@ export default function Home() {
       if (pathParts.length < 2) {
         throw new Error('Invalid GitHub repository URL.');
       }
-      const [owner, repo] = pathParts;
+      const owner = pathParts[0];
+      const repo = pathParts[1].replace(/\.git$/, '');
       const repoData = { owner, repo, url: values.repoUrl };
 
       const result = await fetchCommits(owner, repo);
