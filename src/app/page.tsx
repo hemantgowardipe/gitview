@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -52,6 +52,9 @@ export default function Home() {
   });
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    // Prevent submission if already loading
+    if (isLoading) return;
+
     setIsLoading(true);
     setError(null);
     setCommits([]);
@@ -86,6 +89,28 @@ export default function Home() {
       setIsLoading(false);
     }
   };
+  
+  // Auto-load repo from URL query parameter
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const repoFromQuery = params.get('repo');
+    if (repoFromQuery) {
+      // Validate the URL from the query parameter
+      const validation = formSchema.safeParse({ repoUrl: repoFromQuery });
+      if (validation.success) {
+        form.setValue('repoUrl', repoFromQuery);
+        // Automatically trigger the form submission
+        onSubmit({ repoUrl: repoFromQuery });
+      } else {
+        toast({
+            variant: 'destructive',
+            title: 'Invalid URL in query parameter',
+            description: validation.error.errors[0].message
+        })
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run only once on component mount
 
   const handleRewriteClick = (commit: Commit) => {
     if (!repoInfo) return;
