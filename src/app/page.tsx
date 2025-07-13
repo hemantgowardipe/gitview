@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogFooter, AlertDialogCancel } from '@/components/ui/alert-dialog';
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { fetchCommits, rewriteCommitWithAI } from './actions';
@@ -54,7 +54,6 @@ export default function Home() {
     startFetchingTransition(async () => {
       setCommits([]);
       setRepoInfo(null);
-      // Also update URL in address bar for easy sharing
       window.history.pushState({}, '', `?repo=${encodeURIComponent(repoUrl)}`);
       
       try {
@@ -146,19 +145,25 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-col items-center min-h-screen p-4 md:p-8 bg-background/50">
-      <header className="w-full max-w-4xl mb-8 text-center">
+    <div className="flex flex-col items-center min-h-screen p-4 md:p-8">
+      <header className="w-full max-w-5xl mb-10 text-center relative">
+         <div className="absolute -top-10 -left-10 w-40 h-40 bg-primary/10 rounded-full blur-3xl -z-10"></div>
+         <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-secondary/20 rounded-full blur-3xl -z-10"></div>
         <div className="flex items-center justify-center gap-4 mb-2">
-          <GitBranch className="w-10 h-10 text-primary" />
-          <h1 className="text-4xl md:text-5xl font-bold font-headline">GitView</h1>
+          <div className="p-3 bg-primary/10 rounded-lg">
+            <GitBranch className="w-10 h-10 text-primary" />
+          </div>
+          <h1 className="text-4xl md:text-5xl font-bold font-headline bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
+            GitView
+          </h1>
         </div>
         <p className="text-lg text-muted-foreground">Visualize repository history and enhance commit messages with AI.</p>
       </header>
       
-      <main className="w-full max-w-4xl">
-        <Card className="shadow-lg">
+      <main className="w-full max-w-5xl">
+        <Card className="shadow-lg bg-card/70 backdrop-blur-sm border-border/50">
           <CardHeader>
-            <CardTitle className="font-headline">Select Repository</CardTitle>
+            <CardTitle className="font-headline text-2xl">Select Repository</CardTitle>
             <CardDescription>Enter a public GitHub repository URL to visualize its commit history.</CardDescription>
           </CardHeader>
           <CardContent>
@@ -171,14 +176,14 @@ export default function Home() {
                     <FormItem className="flex-grow">
                       <FormLabel className="sr-only">Repository URL</FormLabel>
                       <FormControl>
-                        <Input placeholder="https://github.com/facebook/react" {...field} />
+                        <Input placeholder="e.g., https://github.com/facebook/react" {...field} className="h-12 text-base"/>
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-                <Button type="submit" disabled={isFetchingCommits} className="w-full sm:w-auto">
-                  {isFetchingCommits ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Visualize'}
+                <Button type="submit" disabled={isFetchingCommits} size="lg" className="h-12 text-base font-bold">
+                  {isFetchingCommits ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Visualize'}
                 </Button>
               </form>
             </Form>
@@ -187,9 +192,9 @@ export default function Home() {
 
         {isFetchingCommits && (
           <div className="mt-8 space-y-4">
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-32 w-full" />
           </div>
         )}
 
@@ -204,35 +209,43 @@ export default function Home() {
         {commits.length > 0 && !isFetchingCommits && (
           <div className="mt-12">
             <h2 className="text-3xl font-bold text-center mb-8 font-headline">Commit History</h2>
-            <div className="relative pl-6 sm:pl-8 border-l-2 border-dashed border-border">
-              {commits.map((commit) => (
+            <div className="relative pl-6 sm:pl-8 border-l-2 border-dashed border-primary/20">
+              {commits.map((commit, index) => (
                 <div key={commit.sha} className="relative mb-8">
-                  <div className="absolute top-5 -left-[1.6rem] sm:-left-[2.1rem] transform">
-                    <GitCommit className="w-6 h-6 sm:w-8 sm:h-8 text-primary bg-background rounded-full p-1" />
+                  <div className="absolute top-5 -left-[1.7rem] sm:-left-[2.2rem] transform">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 bg-background flex items-center justify-center rounded-full">
+                        <GitCommit className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
+                    </div>
                   </div>
-                  <Card className="ml-4 sm:ml-6 hover:shadow-xl transition-shadow duration-300">
-                    <CardHeader>
-                      <div className="flex items-center gap-3">
-                        <Avatar>
-                          <AvatarImage src={commit.author?.avatar_url} alt={commit.author?.login} />
-                          <AvatarFallback>{commit.author?.login?.charAt(0).toUpperCase()}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <CardTitle className="text-base font-medium">{commit.commit.author.name}</CardTitle>
-                          <CardDescription>
-                            committed {formatDistanceToNow(new Date(commit.commit.author.date), { addSuffix: true })}
-                          </CardDescription>
+                  <Card className="ml-4 sm:ml-6 hover:shadow-2xl hover:border-primary/50 transition-all duration-300 bg-card/50 backdrop-blur-sm">
+                    <CardHeader className="pb-4">
+                      <div className="flex justify-between items-start">
+                        <div className="flex items-center gap-3">
+                          <Avatar>
+                            <AvatarImage src={commit.author?.avatar_url} alt={commit.author?.login} />
+                            <AvatarFallback>{commit.author?.login?.charAt(0).toUpperCase()}</AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <CardTitle className="text-base font-medium">{commit.commit.author.name}</CardTitle>
+                            <CardDescription>
+                              committed {formatDistanceToNow(new Date(commit.commit.author.date), { addSuffix: true })}
+                            </CardDescription>
+                          </div>
                         </div>
+                        <a href={commit.html_url} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1.5 pt-1">
+                          {commit.sha.substring(0, 7)} <ExternalLink className="w-3 h-3"/>
+                        </a>
                       </div>
                     </CardHeader>
                     <CardContent>
-                      <p className="font-medium">{commit.commit.message.split('\n')[0]}</p>
-                      <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap break-words">{commit.commit.message.split('\n').slice(1).join('\n')}</p>
+                      <p className="font-medium text-lg text-foreground/90">{commit.commit.message.split('\n')[0]}</p>
+                      {commit.commit.message.split('\n').slice(1).join('\n').trim() && (
+                        <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap break-words font-mono border-l-2 border-border/50 pl-4 py-2 bg-black/10 rounded-r-md">
+                          {commit.commit.message.split('\n').slice(1).join('\n')}
+                        </p>
+                      )}
                     </CardContent>
-                    <CardFooter className="flex justify-between items-center text-sm bg-muted/50 p-4">
-                      <a href={commit.html_url} target="_blank" rel="noopener noreferrer" className="font-mono text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
-                        {commit.sha.substring(0, 7)} <ExternalLink className="w-3 h-3"/>
-                      </a>
+                    <CardFooter className="flex justify-end items-center text-sm p-4">
                       <Button variant="outline" size="sm" onClick={() => handleRewriteClick(commit)} disabled={isRewriting && selectedCommit?.sha === commit.sha}>
                          {isRewriting && selectedCommit?.sha === commit.sha ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
                         Rewrite with AI
@@ -246,30 +259,35 @@ export default function Home() {
         )}
 
         <AlertDialog open={!!selectedCommit} onOpenChange={(open) => !open && setSelectedCommit(null)}>
-          <AlertDialogContent className="max-w-2xl">
+          <AlertDialogContent className="max-w-2xl bg-background/80 backdrop-blur-md">
             <AlertDialogHeader>
-              <AlertDialogTitle className="font-headline">AI Commit Message Rewrite</AlertDialogTitle>
+              <AlertDialogTitle className="font-headline text-2xl flex items-center gap-3">
+                <Wand2 className="text-primary"/> AI Commit Message Rewrite
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                The AI has analyzed the commit changes and suggested a more descriptive message.
+              </AlertDialogDescription>
             </AlertDialogHeader>
             {isRewriting ? (
               <div className="flex flex-col items-center justify-center gap-4 py-16">
                 <Loader2 className="h-12 w-12 animate-spin text-primary" />
-                <p className="text-muted-foreground">AI is thinking...</p>
+                <p className="text-muted-foreground">AI is analyzing the diff...</p>
               </div>
             ) : rewriteData ? (
-              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+              <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2 -mr-2">
                 <div>
-                  <h3 className="font-semibold mb-2">Original Message</h3>
-                  <div className="p-4 rounded-md border bg-muted/50 text-sm whitespace-pre-wrap font-mono">{rewriteData.original}</div>
+                  <h3 className="font-semibold mb-2 text-muted-foreground">Original Message</h3>
+                  <div className="p-4 rounded-md border bg-muted/30 text-sm whitespace-pre-wrap font-mono">{rewriteData.original}</div>
                 </div>
                 <div>
                   <div className="flex justify-between items-center mb-2">
-                    <h3 className="font-semibold">AI Rewritten Message</h3>
+                    <h3 className="font-semibold text-primary">AI Rewritten Message</h3>
                     <Button variant="ghost" size="sm" onClick={handleCopy}>
                       {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                       <span className="ml-2">{copied ? 'Copied!' : 'Copy'}</span>
                     </Button>
                   </div>
-                  <div className="p-4 rounded-md border border-primary/50 bg-primary/5 text-sm whitespace-pre-wrap font-mono">{rewriteData.rewritten}</div>
+                  <div className="p-4 rounded-md border border-primary/50 bg-primary/10 text-sm whitespace-pre-wrap font-mono">{rewriteData.rewritten}</div>
                 </div>
               </div>
             ) : null}
