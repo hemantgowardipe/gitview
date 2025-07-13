@@ -4,14 +4,20 @@ import { rewriteCommitMessage } from '@/ai/flows/rewrite-commit-message';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
+const getAuthHeaders = () => {
+  const headers: HeadersInit = {
+    'Accept': 'application/vnd.github.v3+json',
+  };
+  if (process.env.GITHUB_TOKEN) {
+    headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
+  }
+  return headers;
+}
+
 export async function fetchCommits(owner: string, repo: string) {
   try {
     const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/commits`, {
-      headers: {
-        'Accept': 'application/vnd.github.v3+json',
-        // For unauthenticated requests, the rate limit is 60 requests per hour.
-        // For higher rate limits, an auth token would be needed.
-      },
+      headers: getAuthHeaders(),
       next: {
         revalidate: 3600 // Revalidate once an hour
       }
@@ -22,7 +28,11 @@ export async function fetchCommits(owner: string, repo: string) {
         return { error: 'Repository not found. Please check the URL.' };
       }
       if (response.status === 403) {
-        return { error: 'GitHub API rate limit exceeded. Please try again later.' };
+        const rateLimitInfo = await response.json();
+        const message = rateLimitInfo.message.includes('rate limit exceeded')
+          ? 'GitHub API rate limit exceeded. Please add a GITHUB_TOKEN to your .env file or try again later.'
+          : rateLimitInfo.message;
+        return { error: message };
       }
       const errorData = await response.json();
       return { error: errorData.message || `Failed to fetch commits (status: ${response.status}).` };
@@ -39,9 +49,7 @@ export async function fetchCommits(owner: string, repo: string) {
 export async function rewriteCommitWithAI(owner: string, repo: string, sha: string) {
   try {
     const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/commits/${sha}`, {
-      headers: {
-        'Accept': 'application/vnd.github.v3+json',
-      },
+      headers: getAuthHeaders(),
        next: {
         revalidate: 3600 * 24 // Revalidate once a day
       }
@@ -54,11 +62,21 @@ export async function rewriteCommitWithAI(owner: string, repo: string, sha: stri
 
     const commitDetails = await response.json();
     const originalMessage = commitDetails.commit.message;
-    const diff = commitDetails.files.map((file: any) => file.patch || '').join('\n');
+    // The 'patch' field (diff) isn't always present on the commit details endpoint for merge commits.
+    // We will handle cases where diff might be empty or null.
+    const diff = commitDetails.files?.map((file: any) => file.patch || '').join('\n') || '';
 
-    if (!diff) {
-        return { error: 'Could not retrieve diff for this commit. It might be a merge commit or empty.' };
+    if (!diff && commitDetails.parents.length > 1) {
+       return { rewrittenMessage: `This is a merge commit. No file changes to analyze.
+
+Original message:
+${originalMessage}`, originalMessage };
     }
+    
+    if (!diff) {
+        return { error: 'Could not retrieve diff for this commit. It might be an empty commit with no file changes.' };
+    }
+
 
     const result = await rewriteCommitMessage({
       commitMessage: originalMessage,

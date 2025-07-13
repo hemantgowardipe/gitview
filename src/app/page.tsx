@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -34,8 +34,7 @@ type RewriteData = {
 export default function Home() {
   const [commits, setCommits] = useState<Commit[]>([]);
   const [repoInfo, setRepoInfo] = useState<{ owner: string; repo: string; url: string } | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [isFetchingCommits, startFetchingTransition] = useTransition();
 
   const [isRewriting, setIsRewriting] = useState(false);
   const [rewriteData, setRewriteData] = useState<RewriteData | null>(null);
@@ -51,56 +50,53 @@ export default function Home() {
     },
   });
 
-  const onSubmit = async (values: z.infer<typeof formSchema>) => {
-    // Prevent submission if already loading
-    if (isLoading) return;
+  const handleFetchCommits = (repoUrl: string) => {
+    startFetchingTransition(async () => {
+      setCommits([]);
+      setRepoInfo(null);
+      // Also update URL in address bar for easy sharing
+      window.history.pushState({}, '', `?repo=${encodeURIComponent(repoUrl)}`);
+      
+      try {
+        const url = new URL(repoUrl);
+        const pathParts = url.pathname.split('/').filter(Boolean);
+        if (pathParts.length < 2) {
+          throw new Error('Invalid GitHub repository URL path.');
+        }
+        const owner = pathParts[0];
+        const repo = pathParts[1].replace(/\.git$/, '');
+        const repoData = { owner, repo, url: repoUrl };
 
-    setIsLoading(true);
-    setError(null);
-    setCommits([]);
-    setRepoInfo(null);
+        const result = await fetchCommits(owner, repo);
 
-    try {
-      const url = new URL(values.repoUrl);
-      const pathParts = url.pathname.split('/').filter(Boolean);
-      if (pathParts.length < 2) {
-        throw new Error('Invalid GitHub repository URL.');
+        if (result.error) {
+          throw new Error(result.error);
+        }
+
+        setCommits(result.commits || []);
+        setRepoInfo(repoData);
+      } catch (e: any) {
+        toast({
+          variant: 'destructive',
+          title: 'Error',
+          description: e.message || 'An unexpected error occurred.',
+        });
       }
-      const owner = pathParts[0];
-      const repo = pathParts[1].replace(/\.git$/, '');
-      const repoData = { owner, repo, url: values.repoUrl };
+    });
+  };
 
-      const result = await fetchCommits(owner, repo);
-
-      if (result.error) {
-        throw new Error(result.error);
-      }
-
-      setCommits(result.commits || []);
-      setRepoInfo(repoData);
-    } catch (e: any) {
-      setError(e.message || 'Failed to fetch commits.');
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: e.message || 'An unexpected error occurred.',
-      });
-    } finally {
-      setIsLoading(false);
-    }
+  const onSubmit = (values: z.infer<typeof formSchema>) => {
+    handleFetchCommits(values.repoUrl);
   };
   
-  // Auto-load repo from URL query parameter
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const repoFromQuery = params.get('repo');
     if (repoFromQuery) {
-      // Validate the URL from the query parameter
       const validation = formSchema.safeParse({ repoUrl: repoFromQuery });
       if (validation.success) {
         form.setValue('repoUrl', repoFromQuery);
-        // Automatically trigger the form submission
-        onSubmit({ repoUrl: repoFromQuery });
+        handleFetchCommits(repoFromQuery);
       } else {
         toast({
             variant: 'destructive',
@@ -110,12 +106,13 @@ export default function Home() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run only once on component mount
+  }, []);
 
   const handleRewriteClick = (commit: Commit) => {
     if (!repoInfo) return;
     setSelectedCommit(commit);
     setIsRewriting(true);
+    setRewriteData(null);
     
     rewriteCommitWithAI(repoInfo.owner, repoInfo.repo, commit.sha)
       .then(result => {
@@ -180,15 +177,15 @@ export default function Home() {
                     </FormItem>
                   )}
                 />
-                <Button type="submit" disabled={isLoading} className="w-full sm:w-auto">
-                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Visualize'}
+                <Button type="submit" disabled={isFetchingCommits} className="w-full sm:w-auto">
+                  {isFetchingCommits ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Visualize'}
                 </Button>
               </form>
             </Form>
           </CardContent>
         </Card>
 
-        {isLoading && (
+        {isFetchingCommits && (
           <div className="mt-8 space-y-4">
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-24 w-full" />
@@ -196,19 +193,19 @@ export default function Home() {
           </div>
         )}
 
-        {error && !isLoading && (
-          <Card className="mt-8 text-center text-destructive-foreground bg-destructive/90">
-            <CardContent className="p-6">
-              <p>{error}</p>
-            </CardContent>
-          </Card>
+        {form.formState.errors.repoUrl && !isFetchingCommits && (
+           <Card className="mt-8 text-center text-destructive-foreground bg-destructive/90">
+             <CardContent className="p-6">
+               <p>{form.formState.errors.repoUrl.message}</p>
+             </CardContent>
+           </Card>
         )}
 
-        {commits.length > 0 && !isLoading && (
+        {commits.length > 0 && !isFetchingCommits && (
           <div className="mt-12">
             <h2 className="text-3xl font-bold text-center mb-8 font-headline">Commit History</h2>
             <div className="relative pl-6 sm:pl-8 border-l-2 border-dashed border-border">
-              {commits.map((commit, index) => (
+              {commits.map((commit) => (
                 <div key={commit.sha} className="relative mb-8">
                   <div className="absolute top-5 -left-[1.6rem] sm:-left-[2.1rem] transform">
                     <GitCommit className="w-6 h-6 sm:w-8 sm:h-8 text-primary bg-background rounded-full p-1" />
@@ -236,8 +233,8 @@ export default function Home() {
                       <a href={commit.html_url} target="_blank" rel="noopener noreferrer" className="font-mono text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
                         {commit.sha.substring(0, 7)} <ExternalLink className="w-3 h-3"/>
                       </a>
-                      <Button variant="outline" size="sm" onClick={() => handleRewriteClick(commit)}>
-                        <Wand2 className="mr-2 h-4 w-4" />
+                      <Button variant="outline" size="sm" onClick={() => handleRewriteClick(commit)} disabled={isRewriting && selectedCommit?.sha === commit.sha}>
+                         {isRewriting && selectedCommit?.sha === commit.sha ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
                         Rewrite with AI
                       </Button>
                     </CardFooter>
@@ -277,7 +274,10 @@ export default function Home() {
               </div>
             ) : null}
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setSelectedCommit(null)}>Close</AlertDialogCancel>
+              <AlertDialogCancel onClick={() => {
+                setSelectedCommit(null);
+                setRewriteData(null);
+              }}>Close</AlertDialogCancel>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
