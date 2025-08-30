@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { format, subDays } from 'date-fns';
+import { format, subDays, eachDayOfInterval, startOfISOWeek, endOfISOWeek } from 'date-fns';
 import { formatDistanceToNow } from 'date-fns';
 
 import { Button } from '@/components/ui/button';
@@ -16,9 +16,10 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { fetchCommits, rewriteCommitWithAI } from './actions';
-import { GitBranch, Wand2, Loader2, GitCommit, Copy, Check, ExternalLink, BarChart2, Users, Calendar } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { GitBranch, Wand2, Loader2, GitCommit, Copy, Check, ExternalLink, Users, Calendar, AreaChart } from 'lucide-react';
+import { Area, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, ComposedChart } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 const formSchema = z.object({
   repoUrl: z.string().url({ message: "Please enter a valid GitHub repository URL." }).refine(
@@ -34,17 +35,18 @@ type RewriteData = {
   rewritten: string;
 };
 
-type ContributorStats = {
-  name: string;
-  commits: number;
-  avatar: string;
-}[];
+type Contributor = {
+    login: string;
+    name: string;
+    avatar_url: string;
+    totalCommits: number;
+    dailyCommits: { date: string; commits: number }[];
+};
 
-type DailyCommits = {
-    date: string;
-    commits: number;
-}[];
-
+type ChartData = {
+    allCommits: { date: string; commits: number }[];
+    contributors: Contributor[];
+};
 
 export default function Home() {
   const [commits, setCommits] = useState<Commit[]>([]);
@@ -57,6 +59,9 @@ export default function Home() {
 
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
+  
+  const [timeRange, setTimeRange] = useState('30d');
+
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -65,50 +70,86 @@ export default function Home() {
     },
   });
 
-  const chartData = useMemo(() => {
+  const chartData: ChartData | null = useMemo(() => {
     if (commits.length === 0) return null;
 
-    const contributorStats: { [key: string]: { commits: number; avatar: string } } = {};
-    const dailyCommits: { [key: string]: number } = {};
-    const last30Days = Array.from({ length: 30 }, (_, i) => {
-        const d = subDays(new Date(), i);
-        return format(d, 'yyyy-MM-dd');
-    }).reverse();
+    let startDate: Date;
+    const endDate = new Date();
+
+    switch (timeRange) {
+        case '7d':
+            startDate = subDays(endDate, 6);
+            break;
+        case '30d':
+            startDate = subDays(endDate, 29);
+            break;
+        case 'this_week':
+            startDate = startOfISOWeek(endDate);
+            break;
+        case 'this_month':
+            startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+            break;
+        default:
+            startDate = subDays(endDate, 29);
+    }
     
-    last30Days.forEach(day => dailyCommits[day] = 0);
+    if (timeRange === 'this_week') {
+        const weekEnd = endOfISOWeek(new Date());
+        startDate = startOfISOWeek(new Date());
+    }
+
+
+    const dateInterval = eachDayOfInterval({ start: startDate, end: endDate });
+    const dateMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
+    
+    const contributorMap = new Map<string, { name: string; avatar_url: string; commits: Map<string, number> }>();
 
     commits.forEach(commit => {
-        const author = commit.commit.author.name;
-        const authorLogin = commit.author?.login;
-        const avatar = commit.author?.avatar_url;
+        const commitDate = new Date(commit.commit.author.date);
+        const commitDateString = format(commitDate, 'yyyy-MM-dd');
         
-        if (authorLogin && avatar) {
-            if (!contributorStats[author]) {
-                contributorStats[author] = { commits: 0, avatar: avatar };
+        if (dateMap.has(commitDateString)) {
+            dateMap.set(commitDateString, (dateMap.get(commitDateString) || 0) + 1);
+
+            const author = commit.author;
+            if (author) {
+                if (!contributorMap.has(author.login)) {
+                    contributorMap.set(author.login, {
+                        name: commit.commit.author.name,
+                        avatar_url: author.avatar_url,
+                        commits: new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]))
+                    });
+                }
+                const contributor = contributorMap.get(author.login)!;
+                contributor.commits.set(commitDateString, (contributor.commits.get(commitDateString) || 0) + 1);
             }
-            contributorStats[author].commits++;
-        }
-        
-        const commitDate = format(new Date(commit.commit.author.date), 'yyyy-MM-dd');
-        if (dailyCommits[commitDate] !== undefined) {
-            dailyCommits[commitDate]++;
         }
     });
 
-    const sortedContributors: ContributorStats = Object.entries(contributorStats)
-        .map(([name, { commits, avatar }]) => ({ name, commits, avatar }))
-        .sort((a, b) => b.commits - a.commits)
-        .slice(0, 10);
+    const allCommits = Array.from(dateMap.entries()).map(([date, commits]) => ({
+        date: format(new Date(date), 'MMM dd'),
+        commits
+    })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    const formattedDailyCommits: DailyCommits = Object.entries(dailyCommits)
-        .map(([date, commits]) => ({ date: format(new Date(date), 'MMM dd'), commits }))
+    const contributors: Contributor[] = Array.from(contributorMap.entries()).map(([login, data]) => {
+        const dailyCommits = Array.from(data.commits.entries()).map(([date, commits]) => ({
+            date: format(new Date(date), 'MMM dd'),
+            commits
+        })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        const totalCommits = dailyCommits.reduce((sum, day) => sum + day.commits, 0);
 
+        return {
+            login,
+            name: data.name,
+            avatar_url: data.avatar_url,
+            totalCommits,
+            dailyCommits
+        };
+    }).sort((a, b) => b.totalCommits - a.totalCommits).filter(c => c.totalCommits > 0);
 
-    return {
-        contributors: sortedContributors,
-        daily: formattedDailyCommits,
-    };
-  }, [commits]);
+    return { allCommits, contributors };
+  }, [commits, timeRange]);
 
 
   const handleFetchCommits = (repoUrl: string) => {
@@ -250,48 +291,96 @@ export default function Home() {
             </Form>
           </CardContent>
         </Card>
-
+        
         {(isFetchingCommits || chartData) && (
-            <div className="mt-8">
-                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <Card className="bg-card/70 backdrop-blur-sm border-border/50">
-                        <CardHeader>
-                            <CardTitle className="font-headline text-xl flex items-center gap-2"><Calendar className="w-5 h-5 text-primary"/> Commits (Last 30 Days)</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            {isFetchingCommits ? <Skeleton className="h-[250px] w-full" /> : (
-                                <ChartContainer config={{}} className="h-[250px] w-full">
-                                    <LineChart data={chartData?.daily} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
-                                        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
-                                        <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
-                                        <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} allowDecimals={false}/>
-                                        <Tooltip cursor={{ stroke: 'hsl(var(--primary))', strokeWidth: 2 }} content={<ChartTooltipContent indicator="line" />} />
-                                        <Line type="monotone" dataKey="commits" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
-                                    </LineChart>
-                                </ChartContainer>
-                            )}
-                        </CardContent>
-                    </Card>
-                     <Card className="bg-card/70 backdrop-blur-sm border-border/50">
-                        <CardHeader>
-                             <CardTitle className="font-headline text-xl flex items-center gap-2"><Users className="w-5 h-5 text-primary"/> Top Contributors</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                             {isFetchingCommits ? <Skeleton className="h-[250px] w-full" /> : (
-                                 <ChartContainer config={{}} className="h-[250px] w-full">
-                                    <BarChart data={chartData?.contributors} layout="vertical" margin={{ top: 5, right: 20, left: 40, bottom: 0 }}>
-                                        <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
-                                        <XAxis type="number" dataKey="commits" hide />
-                                        <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} tickMargin={8} width={100} tick={{fontSize: 12}} />
-                                        <Tooltip cursor={{ fill: 'hsl(var(--accent))' }} content={<ChartTooltipContent />} />
-                                        <Bar dataKey="commits" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
-                                    </BarChart>
-                                 </ChartContainer>
-                             )}
-                        </CardContent>
-                    </Card>
-                </div>
-            </div>
+            <Card className="mt-8 bg-card/70 backdrop-blur-sm border-border/50">
+                <CardHeader>
+                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                        <div>
+                            <CardTitle className="font-headline text-xl flex items-center gap-2"><Users className="w-5 h-5 text-primary"/> Contributor Activity</CardTitle>
+                            <CardDescription>An overview of commit activity.</CardDescription>
+                        </div>
+                         <Tabs value={timeRange} onValueChange={setTimeRange}>
+                            <TabsList className="grid w-full grid-cols-4 h-auto">
+                                <TabsTrigger value="7d">7 Days</TabsTrigger>
+                                <TabsTrigger value="30d">30 Days</TabsTrigger>
+                                <TabsTrigger value="this_week">This Week</TabsTrigger>
+                                <TabsTrigger value="this_month">This Month</TabsTrigger>
+                            </TabsList>
+                        </Tabs>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {isFetchingCommits ? <Skeleton className="h-[200px] w-full" /> : (
+                         <ChartContainer config={{}} className="h-[200px] w-full">
+                            <ComposedChart data={chartData?.allCommits} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
+                                <defs>
+                                    <linearGradient id="colorCommits" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
+                                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
+                                <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
+                                <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} allowDecimals={false} />
+                                <Tooltip
+                                    content={({ active, payload, label }) =>
+                                    active && payload && payload.length ? (
+                                        <div className="p-2 bg-background/90 border border-border/50 rounded-lg shadow-lg">
+                                            <p className="font-bold text-base">{`${label}`}</p>
+                                            <p className="text-sm text-primary">{`Commits: ${payload[0].value}`}</p>
+                                        </div>
+                                    ) : null
+                                }
+                                />
+                                <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" strokeWidth={2} fillOpacity={1} fill="url(#colorCommits)" />
+                            </ComposedChart>
+                        </ChartContainer>
+                    )}
+                </CardContent>
+                <CardFooter className="flex flex-col items-start gap-4 pt-4 border-t border-border/50">
+                     <h3 className="text-lg font-headline">Top Contributors</h3>
+                     {isFetchingCommits ? (
+                        <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-[88px] w-full" />)}
+                        </div>
+                     ) : (
+                        <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+                             {chartData?.contributors && chartData.contributors.length > 0 ? chartData.contributors.map(c => (
+                                <Card key={c.login} className="w-full bg-muted/30">
+                                    <CardHeader className="flex flex-row items-center gap-4 p-4">
+                                        <Avatar>
+                                            <AvatarImage src={c.avatar_url} alt={c.login} />
+                                            <AvatarFallback>{c.name.charAt(0)}</AvatarFallback>
+                                        </Avatar>
+                                        <div className="flex-grow">
+                                            <p className="font-bold">{c.name}</p>
+                                            <p className="text-sm text-muted-foreground">{c.totalCommits} commits</p>
+                                        </div>
+                                         <div className="w-[100px] h-[40px]">
+                                             <ResponsiveContainer width="100%" height="100%">
+                                                 <AreaChart data={c.dailyCommits} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                                                      <defs>
+                                                        <linearGradient id={`color-contrib-${c.login}`} x1="0" y1="0" x2="0" y2="1">
+                                                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4}/>
+                                                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                                                        </linearGradient>
+                                                    </defs>
+                                                    <Tooltip
+                                                        content={() => null}
+                                                        cursor={{stroke: 'hsl(var(--primary))', strokeWidth: 1, strokeDasharray: '3 3'}}
+                                                    />
+                                                     <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" strokeWidth={1.5} fillOpacity={1} fill={`url(#color-contrib-${c.login})`} />
+                                                 </AreaChart>
+                                             </ResponsiveContainer>
+                                         </div>
+                                    </CardHeader>
+                                </Card>
+                            )) : <p className="text-muted-foreground">No contributor data available for this period.</p>}
+                        </div>
+                     )}
+                </CardFooter>
+            </Card>
         )}
 
         {form.formState.errors.repoUrl && !isFetchingCommits && (
