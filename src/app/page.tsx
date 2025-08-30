@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { format, subDays, eachDayOfInterval, startOfISOWeek, endOfISOWeek } from 'date-fns';
 import { formatDistanceToNow } from 'date-fns';
 
 import { Button } from '@/components/ui/button';
@@ -15,7 +16,10 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { fetchCommits, rewriteCommitWithAI } from './actions';
-import { GitBranch, Wand2, Loader2, GitCommit, Copy, Check, ExternalLink } from 'lucide-react';
+import { GitBranch, Wand2, Loader2, GitCommit, Copy, Check, ExternalLink, Users } from 'lucide-react';
+import { Area, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, ComposedChart, AreaChart } from 'recharts';
+import { ChartContainer } from '@/components/ui/chart';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 const formSchema = z.object({
   repoUrl: z.string().url({ message: "Please enter a valid GitHub repository URL." }).refine(
@@ -31,6 +35,19 @@ type RewriteData = {
   rewritten: string;
 };
 
+type Contributor = {
+    login: string;
+    name: string;
+    avatar_url: string;
+    totalCommits: number;
+    dailyCommits: { date: string; commits: number }[];
+};
+
+type ChartData = {
+    allCommits: { date: string; commits: number }[];
+    contributors: Contributor[];
+};
+
 export default function Home() {
   const [commits, setCommits] = useState<Commit[]>([]);
   const [repoInfo, setRepoInfo] = useState<{ owner: string; repo: string; url: string } | null>(null);
@@ -42,6 +59,9 @@ export default function Home() {
 
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
+  
+  const [timeRange, setTimeRange] = useState('30d');
+
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -49,6 +69,97 @@ export default function Home() {
       repoUrl: '',
     },
   });
+
+  const chartData: ChartData | null = useMemo(() => {
+    if (commits.length === 0) return null;
+
+    let startDate: Date;
+    const endDate = new Date();
+
+    switch (timeRange) {
+        case '7d':
+            startDate = subDays(endDate, 6);
+            break;
+        case '30d':
+            startDate = subDays(endDate, 29);
+            break;
+        case 'this_week':
+            startDate = startOfISOWeek(endDate);
+            break;
+        case 'this_month':
+            startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+            break;
+        default:
+            startDate = subDays(endDate, 29);
+    }
+    
+    if (timeRange === 'this_week') {
+      startDate = startOfISOWeek(new Date());
+    }
+
+    const dateInterval = eachDayOfInterval({ start: startDate, end: endDate });
+    const allTimeDateInterval = commits.length > 0 ? eachDayOfInterval({start: new Date(commits[commits.length-1].commit.author.date), end: new Date()}) : [];
+
+    const dateMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
+    
+    const contributorMap = new Map<string, { name: string; avatar_url: string; totalCommits: number; commits: Map<string, number> }>();
+    
+    // Calculate totals and metadata for all contributors across all commits
+    commits.forEach(commit => {
+        const author = commit.author;
+        if (author) {
+            if (!contributorMap.has(author.login)) {
+                contributorMap.set(author.login, {
+                    name: commit.commit.author.name,
+                    avatar_url: author.avatar_url,
+                    totalCommits: 0,
+                    commits: new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]))
+                });
+            }
+            const contributor = contributorMap.get(author.login)!;
+            contributor.totalCommits += 1;
+        }
+    });
+
+
+    // Then, populate date-specific maps for the selected time range
+    commits.forEach(commit => {
+        const commitDate = new Date(commit.commit.author.date);
+        const commitDateString = format(commitDate, 'yyyy-MM-dd');
+        
+        if (dateMap.has(commitDateString)) {
+            dateMap.set(commitDateString, (dateMap.get(commitDateString) || 0) + 1);
+            const author = commit.author;
+            if (author && contributorMap.has(author.login)) {
+                const contributor = contributorMap.get(author.login)!;
+                contributor.commits.set(commitDateString, (contributor.commits.get(commitDateString) || 0) + 1);
+            }
+        }
+    });
+
+    const allCommits = Array.from(dateMap.entries()).map(([date, commits]) => ({
+        date: format(new Date(date), 'MMM dd'),
+        commits
+    })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    const contributors: Contributor[] = Array.from(contributorMap.entries()).map(([login, data]) => {
+        const dailyCommits = Array.from(data.commits.entries()).map(([date, commits]) => ({
+            date: format(new Date(date), 'MMM dd'),
+            commits
+        })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        return {
+            login,
+            name: data.name,
+            avatar_url: data.avatar_url,
+            totalCommits: data.totalCommits,
+            dailyCommits
+        };
+    }).sort((a, b) => b.totalCommits - a.totalCommits).filter(c => c.totalCommits > 0);
+
+    return { allCommits, contributors };
+  }, [commits, timeRange]);
+
 
   const handleFetchCommits = (repoUrl: string) => {
     startFetchingTransition(async () => {
@@ -189,13 +300,96 @@ export default function Home() {
             </Form>
           </CardContent>
         </Card>
-
-        {isFetchingCommits && (
-          <div className="mt-8 space-y-4">
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
-          </div>
+        
+        {(isFetchingCommits || chartData) && (
+            <Card className="mt-8 bg-card/70 backdrop-blur-sm border-border/50">
+                <CardHeader>
+                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                        <div>
+                            <CardTitle className="font-headline text-xl flex items-center gap-2"><Users className="w-5 h-5 text-primary"/> Contributor Activity</CardTitle>
+                            <CardDescription>An overview of commit activity.</CardDescription>
+                        </div>
+                         <Tabs value={timeRange} onValueChange={setTimeRange}>
+                            <TabsList className="grid w-full grid-cols-4 h-auto">
+                                <TabsTrigger value="7d">7 Days</TabsTrigger>
+                                <TabsTrigger value="30d">30 Days</TabsTrigger>
+                                <TabsTrigger value="this_week">This Week</TabsTrigger>
+                                <TabsTrigger value="this_month">This Month</TabsTrigger>
+                            </TabsList>
+                        </Tabs>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {isFetchingCommits ? <Skeleton className="h-[200px] w-full" /> : (
+                         <ChartContainer config={{}} className="h-[200px] w-full">
+                            <ComposedChart data={chartData?.allCommits} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
+                                <defs>
+                                    <linearGradient id="colorCommits" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
+                                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
+                                <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
+                                <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} allowDecimals={false} />
+                                <Tooltip
+                                    content={({ active, payload, label }) =>
+                                    active && payload && payload.length ? (
+                                        <div className="p-2 bg-background/90 border border-border/50 rounded-lg shadow-lg">
+                                            <p className="font-bold text-base">{`${label}`}</p>
+                                            <p className="text-sm text-primary">{`Commits: ${payload[0].value}`}</p>
+                                        </div>
+                                    ) : null
+                                }
+                                />
+                                <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" strokeWidth={2} fillOpacity={1} fill="url(#colorCommits)" />
+                            </ComposedChart>
+                        </ChartContainer>
+                    )}
+                </CardContent>
+                <CardFooter className="flex flex-col items-start gap-4 pt-4 border-t border-border/50">
+                     <h3 className="text-lg font-headline">All Contributors</h3>
+                     {isFetchingCommits ? (
+                        <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-[88px] w-full" />)}
+                        </div>
+                     ) : (
+                        <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+                             {chartData?.contributors && chartData.contributors.length > 0 ? chartData.contributors.map(c => (
+                                <Card key={c.login} className="w-full bg-muted/30">
+                                    <CardHeader className="flex flex-row items-center gap-4 p-4">
+                                        <Avatar>
+                                            <AvatarImage src={c.avatar_url} alt={c.login} />
+                                            <AvatarFallback>{c.name.charAt(0)}</AvatarFallback>
+                                        </Avatar>
+                                        <div className="flex-grow">
+                                            <p className="font-bold">{c.name}</p>
+                                            <p className="text-sm text-muted-foreground">{c.totalCommits} commits</p>
+                                        </div>
+                                         <div className="w-[100px] h-[40px]">
+                                             <ResponsiveContainer width="100%" height="100%">
+                                                 <AreaChart data={c.dailyCommits} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                                                      <defs>
+                                                        <linearGradient id={`color-contrib-${c.login}`} x1="0" y1="0" x2="0" y2="1">
+                                                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4}/>
+                                                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                                                        </linearGradient>
+                                                    </defs>
+                                                    <Tooltip
+                                                        content={() => null}
+                                                        cursor={{stroke: 'hsl(var(--primary))', strokeWidth: 1, strokeDasharray: '3 3'}}
+                                                    />
+                                                     <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" strokeWidth={1.5} fillOpacity={1} fill={`url(#color-contrib-${c.login})`} />
+                                                 </AreaChart>
+                                             </ResponsiveContainer>
+                                         </div>
+                                    </CardHeader>
+                                </Card>
+                            )) : <p className="text-muted-foreground">No contributor data available for this period.</p>}
+                        </div>
+                     )}
+                </CardFooter>
+            </Card>
         )}
 
         {form.formState.errors.repoUrl && !isFetchingCommits && (
@@ -240,7 +434,7 @@ export default function Home() {
                     <CardContent>
                       <p className="font-medium text-lg text-foreground/90">{commit.commit.message.split('\n')[0]}</p>
                       {commit.commit.message.split('\n').slice(1).join('\n').trim() && (
-                        <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap break-words font-mono border-l-2 border-border/50 pl-4 py-2 bg-black/10 rounded-r-md">
+                        <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap font-mono border-l-2 border-border/50 pl-4 py-2 bg-black/10 rounded-r-md">
                           {commit.commit.message.split('\n').slice(1).join('\n')}
                         </p>
                       )}
