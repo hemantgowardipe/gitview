@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { format, subDays } from 'date-fns';
 import { formatDistanceToNow } from 'date-fns';
 
 import { Button } from '@/components/ui/button';
@@ -15,7 +16,9 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { fetchCommits, rewriteCommitWithAI } from './actions';
-import { GitBranch, Wand2, Loader2, GitCommit, Copy, Check, ExternalLink } from 'lucide-react';
+import { GitBranch, Wand2, Loader2, GitCommit, Copy, Check, ExternalLink, BarChart2, Users, Calendar } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 
 const formSchema = z.object({
   repoUrl: z.string().url({ message: "Please enter a valid GitHub repository URL." }).refine(
@@ -30,6 +33,18 @@ type RewriteData = {
   original: string;
   rewritten: string;
 };
+
+type ContributorStats = {
+  name: string;
+  commits: number;
+  avatar: string;
+}[];
+
+type DailyCommits = {
+    date: string;
+    commits: number;
+}[];
+
 
 export default function Home() {
   const [commits, setCommits] = useState<Commit[]>([]);
@@ -49,6 +64,52 @@ export default function Home() {
       repoUrl: '',
     },
   });
+
+  const chartData = useMemo(() => {
+    if (commits.length === 0) return null;
+
+    const contributorStats: { [key: string]: { commits: number; avatar: string } } = {};
+    const dailyCommits: { [key: string]: number } = {};
+    const last30Days = Array.from({ length: 30 }, (_, i) => {
+        const d = subDays(new Date(), i);
+        return format(d, 'yyyy-MM-dd');
+    }).reverse();
+    
+    last30Days.forEach(day => dailyCommits[day] = 0);
+
+    commits.forEach(commit => {
+        const author = commit.commit.author.name;
+        const authorLogin = commit.author?.login;
+        const avatar = commit.author?.avatar_url;
+        
+        if (authorLogin && avatar) {
+            if (!contributorStats[author]) {
+                contributorStats[author] = { commits: 0, avatar: avatar };
+            }
+            contributorStats[author].commits++;
+        }
+        
+        const commitDate = format(new Date(commit.commit.author.date), 'yyyy-MM-dd');
+        if (dailyCommits[commitDate] !== undefined) {
+            dailyCommits[commitDate]++;
+        }
+    });
+
+    const sortedContributors: ContributorStats = Object.entries(contributorStats)
+        .map(([name, { commits, avatar }]) => ({ name, commits, avatar }))
+        .sort((a, b) => b.commits - a.commits)
+        .slice(0, 10);
+
+    const formattedDailyCommits: DailyCommits = Object.entries(dailyCommits)
+        .map(([date, commits]) => ({ date: format(new Date(date), 'MMM dd'), commits }))
+
+
+    return {
+        contributors: sortedContributors,
+        daily: formattedDailyCommits,
+    };
+  }, [commits]);
+
 
   const handleFetchCommits = (repoUrl: string) => {
     startFetchingTransition(async () => {
@@ -190,12 +251,47 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {isFetchingCommits && (
-          <div className="mt-8 space-y-4">
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
-          </div>
+        {(isFetchingCommits || chartData) && (
+            <div className="mt-8">
+                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <Card className="bg-card/70 backdrop-blur-sm border-border/50">
+                        <CardHeader>
+                            <CardTitle className="font-headline text-xl flex items-center gap-2"><Calendar className="w-5 h-5 text-primary"/> Commits (Last 30 Days)</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {isFetchingCommits ? <Skeleton className="h-[250px] w-full" /> : (
+                                <ChartContainer config={{}} className="h-[250px] w-full">
+                                    <LineChart data={chartData?.daily} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
+                                        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
+                                        <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
+                                        <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} allowDecimals={false}/>
+                                        <Tooltip cursor={{ stroke: 'hsl(var(--primary))', strokeWidth: 2 }} content={<ChartTooltipContent indicator="line" />} />
+                                        <Line type="monotone" dataKey="commits" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                                    </LineChart>
+                                </ChartContainer>
+                            )}
+                        </CardContent>
+                    </Card>
+                     <Card className="bg-card/70 backdrop-blur-sm border-border/50">
+                        <CardHeader>
+                             <CardTitle className="font-headline text-xl flex items-center gap-2"><Users className="w-5 h-5 text-primary"/> Top Contributors</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                             {isFetchingCommits ? <Skeleton className="h-[250px] w-full" /> : (
+                                 <ChartContainer config={{}} className="h-[250px] w-full">
+                                    <BarChart data={chartData?.contributors} layout="vertical" margin={{ top: 5, right: 20, left: 40, bottom: 0 }}>
+                                        <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
+                                        <XAxis type="number" dataKey="commits" hide />
+                                        <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} tickMargin={8} width={100} tick={{fontSize: 12}} />
+                                        <Tooltip cursor={{ fill: 'hsl(var(--accent))' }} content={<ChartTooltipContent />} />
+                                        <Bar dataKey="commits" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
+                                    </BarChart>
+                                 </ChartContainer>
+                             )}
+                        </CardContent>
+                    </Card>
+                </div>
+            </div>
         )}
 
         {form.formState.errors.repoUrl && !isFetchingCommits && (
