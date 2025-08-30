@@ -16,9 +16,9 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { fetchCommits, rewriteCommitWithAI } from './actions';
-import { GitBranch, Wand2, Loader2, GitCommit, Copy, Check, ExternalLink, Users, Calendar, AreaChart } from 'lucide-react';
-import { Area, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, ComposedChart } from 'recharts';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+import { GitBranch, Wand2, Loader2, GitCommit, Copy, Check, ExternalLink, Users } from 'lucide-react';
+import { Area, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, ComposedChart, AreaChart } from 'recharts';
+import { ChartContainer } from '@/components/ui/chart';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 const formSchema = z.object({
@@ -94,32 +94,40 @@ export default function Home() {
     }
     
     if (timeRange === 'this_week') {
-        const weekEnd = endOfISOWeek(new Date());
-        startDate = startOfISOWeek(new Date());
+      startDate = startOfISOWeek(new Date());
     }
-
 
     const dateInterval = eachDayOfInterval({ start: startDate, end: endDate });
     const dateMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
     
-    const contributorMap = new Map<string, { name: string; avatar_url: string; commits: Map<string, number> }>();
+    const contributorMap = new Map<string, { name: string; avatar_url: string; totalCommits: number; commits: Map<string, number> }>();
 
+    // First, calculate totals and metadata for all contributors across all commits
+    commits.forEach(commit => {
+        const author = commit.author;
+        if (author) {
+            if (!contributorMap.has(author.login)) {
+                contributorMap.set(author.login, {
+                    name: commit.commit.author.name,
+                    avatar_url: author.avatar_url,
+                    totalCommits: 0,
+                    commits: new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]))
+                });
+            }
+            const contributor = contributorMap.get(author.login)!;
+            contributor.totalCommits += 1;
+        }
+    });
+
+    // Then, populate date-specific maps for the selected time range
     commits.forEach(commit => {
         const commitDate = new Date(commit.commit.author.date);
         const commitDateString = format(commitDate, 'yyyy-MM-dd');
         
         if (dateMap.has(commitDateString)) {
             dateMap.set(commitDateString, (dateMap.get(commitDateString) || 0) + 1);
-
             const author = commit.author;
-            if (author) {
-                if (!contributorMap.has(author.login)) {
-                    contributorMap.set(author.login, {
-                        name: commit.commit.author.name,
-                        avatar_url: author.avatar_url,
-                        commits: new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]))
-                    });
-                }
+            if (author && contributorMap.has(author.login)) {
                 const contributor = contributorMap.get(author.login)!;
                 contributor.commits.set(commitDateString, (contributor.commits.get(commitDateString) || 0) + 1);
             }
@@ -137,13 +145,11 @@ export default function Home() {
             commits
         })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         
-        const totalCommits = dailyCommits.reduce((sum, day) => sum + day.commits, 0);
-
         return {
             login,
             name: data.name,
             avatar_url: data.avatar_url,
-            totalCommits,
+            totalCommits: data.totalCommits,
             dailyCommits
         };
     }).sort((a, b) => b.totalCommits - a.totalCommits).filter(c => c.totalCommits > 0);
