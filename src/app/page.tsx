@@ -98,11 +98,13 @@ export default function Home() {
     }
 
     const dateInterval = eachDayOfInterval({ start: startDate, end: endDate });
+    const allTimeDateInterval = commits.length > 0 ? eachDayOfInterval({start: new Date(commits[commits.length-1].commit.author.date), end: new Date()}) : [];
+
     const dateMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
     
     const contributorMap = new Map<string, { name: string; avatar_url: string; totalCommits: number; commits: Map<string, number> }>();
-
-    // First, calculate totals and metadata for all contributors across all commits
+    
+    // Calculate totals and metadata for all contributors across all commits
     commits.forEach(commit => {
         const author = commit.author;
         if (author) {
@@ -118,6 +120,7 @@ export default function Home() {
             contributor.totalCommits += 1;
         }
     });
+
 
     // Then, populate date-specific maps for the selected time range
     commits.forEach(commit => {
@@ -345,7 +348,7 @@ export default function Home() {
                     )}
                 </CardContent>
                 <CardFooter className="flex flex-col items-start gap-4 pt-4 border-t border-border/50">
-                     <h3 className="text-lg font-headline">Top Contributors</h3>
+                     <h3 className="text-lg font-headline">All Contributors</h3>
                      {isFetchingCommits ? (
                         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
                             {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-[88px] w-full" />)}
@@ -431,7 +434,7 @@ export default function Home() {
                     <CardContent>
                       <p className="font-medium text-lg text-foreground/90">{commit.commit.message.split('\n')[0]}</p>
                       {commit.commit.message.split('\n').slice(1).join('\n').trim() && (
-                        <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap break-words font-mono border-l-2 border-border/50 pl-4 py-2 bg-black/10 rounded-r-md">
+                        <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap font-mono border-l-2 border-border/50 pl-4 py-2 bg-black/10 rounded-r-md">
                           {commit.commit.message.split('\n').slice(1).join('\n')}
                         </p>
                       )}
