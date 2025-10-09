@@ -15,31 +15,45 @@ const getAuthHeaders = () => {
 }
 
 export async function fetchCommits(owner: string, repo: string) {
+  let allCommits: any[] = [];
+  let page = 1;
+  const perPage = 100; // Fetch 100 commits per page
+  let hasMore = true;
+
   try {
-    const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/commits`, {
-      headers: getAuthHeaders(),
-      next: {
-        revalidate: 3600 // Revalidate once an hour
-      }
-    });
+    while (hasMore) {
+      const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/commits?per_page=${perPage}&page=${page}`, {
+        headers: getAuthHeaders(),
+        next: {
+          revalidate: 3600 // Revalidate once an hour
+        }
+      });
 
-    if (!response.ok) {
-      if (response.status === 404) {
-        return { error: 'Repository not found. Please check the URL.' };
+      if (!response.ok) {
+        if (response.status === 404) {
+          return { error: 'Repository not found. Please check the URL.' };
+        }
+        if (response.status === 403) {
+          const rateLimitInfo = await response.json();
+          const message = rateLimitInfo.message.includes('rate limit exceeded')
+            ? 'GitHub API rate limit exceeded. Please add a GITHUB_TOKEN to your .env file or try again later.'
+            : rateLimitInfo.message;
+          return { error: message };
+        }
+        const errorData = await response.json();
+        return { error: errorData.message || `Failed to fetch commits (status: ${response.status}).` };
       }
-      if (response.status === 403) {
-        const rateLimitInfo = await response.json();
-        const message = rateLimitInfo.message.includes('rate limit exceeded')
-          ? 'GitHub API rate limit exceeded. Please add a GITHUB_TOKEN to your .env file or try again later.'
-          : rateLimitInfo.message;
-        return { error: message };
+
+      const commits = await response.json();
+      
+      if (commits.length < perPage) {
+        hasMore = false;
       }
-      const errorData = await response.json();
-      return { error: errorData.message || `Failed to fetch commits (status: ${response.status}).` };
+
+      allCommits = allCommits.concat(commits);
+      page++;
     }
-
-    const commits = await response.json();
-    return { commits };
+    return { commits: allCommits };
   } catch (error) {
     console.error('Fetch commits error:', error);
     return { error: 'An unexpected network error occurred.' };
