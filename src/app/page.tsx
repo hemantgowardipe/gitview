@@ -155,7 +155,7 @@ export default function Home() {
             totalCommits: data.totalCommits,
             dailyCommits
         };
-    }).sort((a, b) => b.totalCommits - a.totalCommits).filter(c => c.totalCommits > 0);
+    }).sort((a, b) => b.totalCommits - a.totalCommits);
 
     return { allCommits, contributors };
   }, [commits, timeRange]);
@@ -182,8 +182,13 @@ export default function Home() {
         if (result.error) {
           throw new Error(result.error);
         }
-
-        setCommits(result.commits || []);
+        
+        if (!result.commits || result.commits.length === 0) {
+            setCommits([]);
+        } else {
+            setCommits(result.commits);
+        }
+        
         setRepoInfo(repoData);
       } catch (e: any) {
         toast({
@@ -301,7 +306,7 @@ export default function Home() {
           </CardContent>
         </Card>
         
-        {(isFetchingCommits || chartData) && (
+        {(isFetchingCommits || repoInfo) && (
             <Card className="mt-8 bg-card/70 backdrop-blur-sm border-border/50">
                 <CardHeader>
                     <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
@@ -321,30 +326,36 @@ export default function Home() {
                 </CardHeader>
                 <CardContent>
                     {isFetchingCommits ? <Skeleton className="h-[200px] w-full" /> : (
-                         <ChartContainer config={{}} className="h-[200px] w-full">
-                            <ComposedChart data={chartData?.allCommits} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
-                                <defs>
-                                    <linearGradient id="colorCommits" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
-                                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
-                                <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
-                                <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} allowDecimals={false} />
-                                <Tooltip
-                                    content={({ active, payload, label }) =>
-                                    active && payload && payload.length ? (
-                                        <div className="p-2 bg-background/90 border border-border/50 rounded-lg shadow-lg">
-                                            <p className="font-bold text-base">{`${label}`}</p>
-                                            <p className="text-sm text-primary">{`Commits: ${payload[0].value}`}</p>
-                                        </div>
-                                    ) : null
-                                }
-                                />
-                                <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" strokeWidth={2} fillOpacity={1} fill="url(#colorCommits)" />
-                            </ComposedChart>
-                        </ChartContainer>
+                        chartData && chartData.allCommits.length > 0 ? (
+                            <ChartContainer config={{}} className="h-[200px] w-full">
+                                <ComposedChart data={chartData?.allCommits} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
+                                    <defs>
+                                        <linearGradient id="colorCommits" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
+                                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
+                                    <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
+                                    <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} allowDecimals={false} />
+                                    <Tooltip
+                                        content={({ active, payload, label }) =>
+                                        active && payload && payload.length ? (
+                                            <div className="p-2 bg-background/90 border border-border/50 rounded-lg shadow-lg">
+                                                <p className="font-bold text-base">{`${label}`}</p>
+                                                <p className="text-sm text-primary">{`Commits: ${payload[0].value}`}</p>
+                                            </div>
+                                        ) : null
+                                    }
+                                    />
+                                    <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" strokeWidth={2} fillOpacity={1} fill="url(#colorCommits)" />
+                                </ComposedChart>
+                            </ChartContainer>
+                        ) : (
+                            <div className="h-[200px] w-full flex items-center justify-center text-muted-foreground">
+                                No commit activity to display for this period.
+                            </div>
+                        )
                     )}
                 </CardContent>
                 <CardFooter className="flex flex-col items-start gap-4 pt-4 border-t border-border/50">
@@ -355,7 +366,7 @@ export default function Home() {
                         </div>
                      ) : (
                         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
-                             {chartData?.contributors && chartData.contributors.length > 0 ? chartData.contributors.map(c => (
+                             {chartData && chartData.contributors.length > 0 ? chartData.contributors.map(c => (
                                 <Card key={c.login} className="w-full bg-muted/30">
                                     <CardHeader className="flex flex-row items-center gap-4 p-4">
                                         <Avatar>
@@ -385,7 +396,7 @@ export default function Home() {
                                          </div>
                                     </CardHeader>
                                 </Card>
-                            )) : <p className="text-muted-foreground">No contributor data available for this period.</p>}
+                            )) : <p className="text-muted-foreground">No contributor data available for this repository.</p>}
                         </div>
                      )}
                 </CardFooter>
