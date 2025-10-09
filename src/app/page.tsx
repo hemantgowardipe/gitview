@@ -89,17 +89,15 @@ export default function Home() {
         case 'this_month':
             startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
             break;
+        case 'all_time':
+            startDate = commits.length > 0 ? new Date(commits[commits.length - 1].commit.author.date) : new Date();
+            break;
         default:
             startDate = subDays(endDate, 29);
     }
-    
-    if (timeRange === 'this_week') {
-      startDate = startOfISOWeek(new Date());
-    }
 
     const dateInterval = eachDayOfInterval({ start: startDate, end: endDate });
-    const allTimeDateInterval = commits.length > 0 ? eachDayOfInterval({start: new Date(commits[commits.length-1].commit.author.date), end: new Date()}) : [];
-
+    
     const dateMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
     
     const contributorMap = new Map<string, { name: string; avatar_url: string; totalCommits: number; commits: Map<string, number> }>();
@@ -113,37 +111,50 @@ export default function Home() {
                     name: commit.commit.author.name,
                     avatar_url: author.avatar_url,
                     totalCommits: 0,
-                    commits: new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]))
+                    commits: new Map() // Start with an empty map for daily commits
                 });
             }
             const contributor = contributorMap.get(author.login)!;
             contributor.totalCommits += 1;
+            
+            // Also populate the initial daily commits map for all time
+            const commitDateString = format(new Date(commit.commit.author.date), 'yyyy-MM-dd');
+            contributor.commits.set(commitDateString, (contributor.commits.get(commitDateString) || 0) + 1);
         }
     });
 
 
-    // Then, populate date-specific maps for the selected time range
+    // Then, filter and populate date-specific maps for the selected time range
+    const filteredDateMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
+    
     commits.forEach(commit => {
         const commitDate = new Date(commit.commit.author.date);
         const commitDateString = format(commitDate, 'yyyy-MM-dd');
         
-        if (dateMap.has(commitDateString)) {
-            dateMap.set(commitDateString, (dateMap.get(commitDateString) || 0) + 1);
-            const author = commit.author;
-            if (author && contributorMap.has(author.login)) {
-                const contributor = contributorMap.get(author.login)!;
-                contributor.commits.set(commitDateString, (contributor.commits.get(commitDateString) || 0) + 1);
-            }
+        if (filteredDateMap.has(commitDateString)) {
+            filteredDateMap.set(commitDateString, (filteredDateMap.get(commitDateString) || 0) + 1);
         }
     });
-
-    const allCommits = Array.from(dateMap.entries()).map(([date, commits]) => ({
+    
+    const allCommits = Array.from(filteredDateMap.entries()).map(([date, commits]) => ({
         date: format(new Date(date), 'MMM dd'),
         commits
     })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     const contributors: Contributor[] = Array.from(contributorMap.entries()).map(([login, data]) => {
-        const dailyCommits = Array.from(data.commits.entries()).map(([date, commits]) => ({
+        const dailyCommitsMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
+        
+        // Filter contributor's commits for the selected date range
+        commits.forEach(commit => {
+            if (commit.author?.login === login) {
+                const commitDateString = format(new Date(commit.commit.author.date), 'yyyy-MM-dd');
+                if (dailyCommitsMap.has(commitDateString)) {
+                    dailyCommitsMap.set(commitDateString, (dailyCommitsMap.get(commitDateString) || 0) + 1);
+                }
+            }
+        });
+        
+        const dailyCommits = Array.from(dailyCommitsMap.entries()).map(([date, commits]) => ({
             date: format(new Date(date), 'MMM dd'),
             commits
         })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -315,11 +326,12 @@ export default function Home() {
                             <CardDescription>An overview of commit activity.</CardDescription>
                         </div>
                          <Tabs value={timeRange} onValueChange={setTimeRange}>
-                            <TabsList className="grid w-full grid-cols-4 h-auto">
+                            <TabsList className="grid w-full grid-cols-5 h-auto">
                                 <TabsTrigger value="7d">7 Days</TabsTrigger>
                                 <TabsTrigger value="30d">30 Days</TabsTrigger>
                                 <TabsTrigger value="this_week">This Week</TabsTrigger>
                                 <TabsTrigger value="this_month">This Month</TabsTrigger>
+                                <TabsTrigger value="all_time">All Time</TabsTrigger>
                             </TabsList>
                         </Tabs>
                     </div>
@@ -371,7 +383,7 @@ export default function Home() {
                                     <CardHeader className="flex flex-row items-center gap-4 p-4">
                                         <Avatar>
                                             <AvatarImage src={c.avatar_url} alt={c.login} />
-                                            <AvatarFallback>{c.name.charAt(0)}</AvatarFallback>
+                                            <AvatarFallback>{c.name?.charAt(0)}</AvatarFallback>
                                         </Avatar>
                                         <div className="flex-grow">
                                             <p className="font-bold">{c.name}</p>
@@ -508,3 +520,5 @@ export default function Home() {
     </div>
   );
 }
+
+    
