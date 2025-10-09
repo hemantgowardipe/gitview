@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { format, subDays, eachDayOfInterval, startOfISOWeek, endOfISOWeek } from 'date-fns';
+import { format, subDays, eachDayOfInterval, startOfISOWeek, endOfISOWeek, startOfMonth } from 'date-fns';
 import { formatDistanceToNow } from 'date-fns';
 
 import { Button } from '@/components/ui/button';
@@ -60,7 +60,7 @@ export default function Home() {
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
   
-  const [timeRange, setTimeRange] = useState('30d');
+  const [timeRange, setTimeRange] = useState('this_month');
 
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -77,34 +77,41 @@ export default function Home() {
     const endDate = new Date();
 
     switch (timeRange) {
-        case '7d':
-            startDate = subDays(endDate, 6);
-            break;
-        case '30d':
-            startDate = subDays(endDate, 29);
-            break;
         case 'this_week':
             startDate = startOfISOWeek(endDate);
             break;
         case 'this_month':
-            startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+            startDate = startOfMonth(endDate);
+            break;
+        case 'all_time':
+            startDate = commits.length > 0 ? new Date(commits[commits.length - 1].commit.author.date) : new Date();
             break;
         default:
-            startDate = subDays(endDate, 29);
+            startDate = startOfMonth(endDate);
     }
     
-    if (timeRange === 'this_week') {
-      startDate = startOfISOWeek(new Date());
-    }
+    const filteredCommits = commits.filter(commit => {
+        const commitDate = new Date(commit.commit.author.date);
+        return commitDate >= startDate && commitDate <= endDate;
+    });
 
     const dateInterval = eachDayOfInterval({ start: startDate, end: endDate });
-    const allTimeDateInterval = commits.length > 0 ? eachDayOfInterval({start: new Date(commits[commits.length-1].commit.author.date), end: new Date()}) : [];
-
     const dateMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
     
-    const contributorMap = new Map<string, { name: string; avatar_url: string; totalCommits: number; commits: Map<string, number> }>();
+    filteredCommits.forEach(commit => {
+        const commitDateString = format(new Date(commit.commit.author.date), 'yyyy-MM-dd');
+        if (dateMap.has(commitDateString)) {
+            dateMap.set(commitDateString, (dateMap.get(commitDateString) || 0) + 1);
+        }
+    });
     
-    // Calculate totals and metadata for all contributors across all commits
+    const allCommitsChartData = Array.from(dateMap.entries()).map(([date, commits]) => ({
+        date: format(new Date(date), 'MMM dd'),
+        commits
+    })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    const contributorMap = new Map<string, { name: string; avatar_url: string; totalCommits: number; }>();
+    
     commits.forEach(commit => {
         const author = commit.author;
         if (author) {
@@ -113,7 +120,6 @@ export default function Home() {
                     name: commit.commit.author.name,
                     avatar_url: author.avatar_url,
                     totalCommits: 0,
-                    commits: new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]))
                 });
             }
             const contributor = contributorMap.get(author.login)!;
@@ -121,29 +127,19 @@ export default function Home() {
         }
     });
 
-
-    // Then, populate date-specific maps for the selected time range
-    commits.forEach(commit => {
-        const commitDate = new Date(commit.commit.author.date);
-        const commitDateString = format(commitDate, 'yyyy-MM-dd');
-        
-        if (dateMap.has(commitDateString)) {
-            dateMap.set(commitDateString, (dateMap.get(commitDateString) || 0) + 1);
-            const author = commit.author;
-            if (author && contributorMap.has(author.login)) {
-                const contributor = contributorMap.get(author.login)!;
-                contributor.commits.set(commitDateString, (contributor.commits.get(commitDateString) || 0) + 1);
-            }
-        }
-    });
-
-    const allCommits = Array.from(dateMap.entries()).map(([date, commits]) => ({
-        date: format(new Date(date), 'MMM dd'),
-        commits
-    })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
     const contributors: Contributor[] = Array.from(contributorMap.entries()).map(([login, data]) => {
-        const dailyCommits = Array.from(data.commits.entries()).map(([date, commits]) => ({
+        const dailyCommitsMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
+        
+        filteredCommits.forEach(commit => {
+            if (commit.author?.login === login) {
+                const commitDateString = format(new Date(commit.commit.author.date), 'yyyy-MM-dd');
+                if (dailyCommitsMap.has(commitDateString)) {
+                    dailyCommitsMap.set(commitDateString, (dailyCommitsMap.get(commitDateString) || 0) + 1);
+                }
+            }
+        });
+        
+        const dailyCommits = Array.from(dailyCommitsMap.entries()).map(([date, commits]) => ({
             date: format(new Date(date), 'MMM dd'),
             commits
         })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -155,9 +151,9 @@ export default function Home() {
             totalCommits: data.totalCommits,
             dailyCommits
         };
-    }).sort((a, b) => b.totalCommits - a.totalCommits).filter(c => c.totalCommits > 0);
+    }).sort((a, b) => b.totalCommits - a.totalCommits);
 
-    return { allCommits, contributors };
+    return { allCommits: allCommitsChartData, contributors };
   }, [commits, timeRange]);
 
 
@@ -182,8 +178,13 @@ export default function Home() {
         if (result.error) {
           throw new Error(result.error);
         }
-
-        setCommits(result.commits || []);
+        
+        if (!result.commits || result.commits.length === 0) {
+            setCommits([]);
+        } else {
+            setCommits(result.commits);
+        }
+        
         setRepoInfo(repoData);
       } catch (e: any) {
         toast({
@@ -258,13 +259,13 @@ export default function Home() {
   return (
     <div className="flex flex-col items-center min-h-screen p-4 md:p-8">
       <header className="w-full max-w-5xl mb-10 text-center relative">
-         <div className="absolute -top-10 -left-10 w-40 h-40 bg-primary/10 rounded-full blur-3xl -z-10"></div>
+         <div className="absolute -top-10 -left-10 w-40 h-40 bg-primary/5 rounded-full blur-3xl -z-10"></div>
          <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-secondary/20 rounded-full blur-3xl -z-10"></div>
         <div className="flex items-center justify-center gap-4 mb-2">
-          <div className="p-3 bg-primary/10 rounded-lg">
+          <div className="p-3 bg-card border rounded-lg">
             <GitBranch className="w-10 h-10 text-primary" />
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold font-headline bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
+          <h1 className="text-4xl md:text-5xl font-bold font-headline">
             GitView
           </h1>
         </div>
@@ -272,7 +273,7 @@ export default function Home() {
       </header>
       
       <main className="w-full max-w-5xl">
-        <Card className="shadow-lg bg-card/70 backdrop-blur-sm border-border/50">
+        <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="font-headline text-2xl">Select Repository</CardTitle>
             <CardDescription>Enter a public GitHub repository URL to visualize its commit history.</CardDescription>
@@ -301,8 +302,8 @@ export default function Home() {
           </CardContent>
         </Card>
         
-        {(isFetchingCommits || chartData) && (
-            <Card className="mt-8 bg-card/70 backdrop-blur-sm border-border/50">
+        {(isFetchingCommits || repoInfo) && (
+            <Card className="mt-8 shadow-sm">
                 <CardHeader>
                     <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
                         <div>
@@ -310,44 +311,49 @@ export default function Home() {
                             <CardDescription>An overview of commit activity.</CardDescription>
                         </div>
                          <Tabs value={timeRange} onValueChange={setTimeRange}>
-                            <TabsList className="grid w-full grid-cols-4 h-auto">
-                                <TabsTrigger value="7d">7 Days</TabsTrigger>
-                                <TabsTrigger value="30d">30 Days</TabsTrigger>
+                            <TabsList className="grid w-full grid-cols-3 h-auto">
                                 <TabsTrigger value="this_week">This Week</TabsTrigger>
                                 <TabsTrigger value="this_month">This Month</TabsTrigger>
+                                <TabsTrigger value="all_time">All Time</TabsTrigger>
                             </TabsList>
                         </Tabs>
                     </div>
                 </CardHeader>
                 <CardContent>
                     {isFetchingCommits ? <Skeleton className="h-[200px] w-full" /> : (
-                         <ChartContainer config={{}} className="h-[200px] w-full">
-                            <ComposedChart data={chartData?.allCommits} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
-                                <defs>
-                                    <linearGradient id="colorCommits" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
-                                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
-                                <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
-                                <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} allowDecimals={false} />
-                                <Tooltip
-                                    content={({ active, payload, label }) =>
-                                    active && payload && payload.length ? (
-                                        <div className="p-2 bg-background/90 border border-border/50 rounded-lg shadow-lg">
-                                            <p className="font-bold text-base">{`${label}`}</p>
-                                            <p className="text-sm text-primary">{`Commits: ${payload[0].value}`}</p>
-                                        </div>
-                                    ) : null
-                                }
-                                />
-                                <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" strokeWidth={2} fillOpacity={1} fill="url(#colorCommits)" />
-                            </ComposedChart>
-                        </ChartContainer>
+                        chartData && chartData.allCommits.length > 0 ? (
+                            <ChartContainer config={{}} className="h-[200px] w-full">
+                                <ComposedChart data={chartData?.allCommits} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
+                                    <defs>
+                                        <linearGradient id="colorCommits" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4}/>
+                                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                                    <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
+                                    <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} allowDecimals={false} />
+                                    <Tooltip
+                                        content={({ active, payload, label }) =>
+                                        active && payload && payload.length ? (
+                                            <div className="p-2 bg-background border border-border rounded-lg shadow-lg">
+                                                <p className="font-bold text-base">{`${label}`}</p>
+                                                <p className="text-sm text-primary">{`Commits: ${payload[0].value}`}</p>
+                                            </div>
+                                        ) : null
+                                    }
+                                    />
+                                    <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" strokeWidth={2} fillOpacity={1} fill="url(#colorCommits)" />
+                                </ComposedChart>
+                            </ChartContainer>
+                        ) : (
+                            <div className="h-[200px] w-full flex items-center justify-center text-muted-foreground">
+                                No commit activity to display for this period.
+                            </div>
+                        )
                     )}
                 </CardContent>
-                <CardFooter className="flex flex-col items-start gap-4 pt-4 border-t border-border/50">
+                <CardFooter className="flex flex-col items-start gap-4 pt-4 border-t">
                      <h3 className="text-lg font-headline">All Contributors</h3>
                      {isFetchingCommits ? (
                         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -355,12 +361,12 @@ export default function Home() {
                         </div>
                      ) : (
                         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
-                             {chartData?.contributors && chartData.contributors.length > 0 ? chartData.contributors.map(c => (
-                                <Card key={c.login} className="w-full bg-muted/30">
+                             {chartData && chartData.contributors.length > 0 ? chartData.contributors.map(c => (
+                                <Card key={c.login} className="w-full bg-background">
                                     <CardHeader className="flex flex-row items-center gap-4 p-4">
                                         <Avatar>
                                             <AvatarImage src={c.avatar_url} alt={c.login} />
-                                            <AvatarFallback>{c.name.charAt(0)}</AvatarFallback>
+                                            <AvatarFallback>{c.name?.charAt(0)}</AvatarFallback>
                                         </Avatar>
                                         <div className="flex-grow">
                                             <p className="font-bold">{c.name}</p>
@@ -385,7 +391,7 @@ export default function Home() {
                                          </div>
                                     </CardHeader>
                                 </Card>
-                            )) : <p className="text-muted-foreground">No contributor data available for this period.</p>}
+                            )) : <p className="text-muted-foreground">No contributor data available for this repository.</p>}
                         </div>
                      )}
                 </CardFooter>
@@ -403,15 +409,15 @@ export default function Home() {
         {commits.length > 0 && !isFetchingCommits && (
           <div className="mt-12">
             <h2 className="text-3xl font-bold text-center mb-8 font-headline">Commit History</h2>
-            <div className="relative pl-6 sm:pl-8 border-l-2 border-dashed border-primary/20">
+            <div className="relative pl-6 sm:pl-8 border-l-2 border-dashed border-border">
               {commits.map((commit, index) => (
                 <div key={commit.sha} className="relative mb-8">
                   <div className="absolute top-5 -left-[1.7rem] sm:-left-[2.2rem] transform">
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 bg-background flex items-center justify-center rounded-full">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 bg-background flex items-center justify-center rounded-full border">
                         <GitCommit className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
                     </div>
                   </div>
-                  <Card className="ml-4 sm:ml-6 hover:shadow-2xl hover:border-primary/50 transition-all duration-300 bg-card/50 backdrop-blur-sm">
+                  <Card className="ml-4 sm:ml-6 hover:shadow-md hover:border-primary/50 transition-all duration-300">
                     <CardHeader className="pb-4">
                       <div className="flex justify-between items-start">
                         <div className="flex items-center gap-3">
@@ -434,7 +440,7 @@ export default function Home() {
                     <CardContent>
                       <p className="font-medium text-lg text-foreground/90">{commit.commit.message.split('\n')[0]}</p>
                       {commit.commit.message.split('\n').slice(1).join('\n').trim() && (
-                        <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap font-mono border-l-2 border-border/50 pl-4 py-2 bg-black/10 rounded-r-md">
+                        <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap font-mono border-l-2 pl-4 py-2 bg-muted/50 rounded-r-md">
                           {commit.commit.message.split('\n').slice(1).join('\n')}
                         </p>
                       )}
@@ -453,7 +459,7 @@ export default function Home() {
         )}
 
         <AlertDialog open={!!selectedCommit} onOpenChange={(open) => !open && setSelectedCommit(null)}>
-          <AlertDialogContent className="max-w-2xl bg-background/80 backdrop-blur-md">
+          <AlertDialogContent className="max-w-2xl">
             <AlertDialogHeader>
               <AlertDialogTitle className="font-headline text-2xl flex items-center gap-3">
                 <Wand2 className="text-primary"/> AI Commit Message Rewrite
@@ -471,7 +477,7 @@ export default function Home() {
               <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2 -mr-2">
                 <div>
                   <h3 className="font-semibold mb-2 text-muted-foreground">Original Message</h3>
-                  <div className="p-4 rounded-md border bg-muted/30 text-sm whitespace-pre-wrap font-mono">{rewriteData.original}</div>
+                  <div className="p-4 rounded-md border bg-muted/50 text-sm whitespace-pre-wrap font-mono">{rewriteData.original}</div>
                 </div>
                 <div>
                   <div className="flex justify-between items-center mb-2">
@@ -497,3 +503,5 @@ export default function Home() {
     </div>
   );
 }
+
+    
