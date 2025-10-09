@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { format, subDays, eachDayOfInterval, startOfISOWeek, endOfISOWeek } from 'date-fns';
+import { format, subDays, eachDayOfInterval, startOfISOWeek, endOfISOWeek, startOfMonth } from 'date-fns';
 import { formatDistanceToNow } from 'date-fns';
 
 import { Button } from '@/components/ui/button';
@@ -60,7 +60,7 @@ export default function Home() {
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
   
-  const [timeRange, setTimeRange] = useState('30d');
+  const [timeRange, setTimeRange] = useState('this_month');
 
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -77,32 +77,41 @@ export default function Home() {
     const endDate = new Date();
 
     switch (timeRange) {
-        case '7d':
-            startDate = subDays(endDate, 6);
-            break;
-        case '30d':
-            startDate = subDays(endDate, 29);
-            break;
         case 'this_week':
             startDate = startOfISOWeek(endDate);
             break;
         case 'this_month':
-            startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+            startDate = startOfMonth(endDate);
             break;
         case 'all_time':
             startDate = commits.length > 0 ? new Date(commits[commits.length - 1].commit.author.date) : new Date();
             break;
         default:
-            startDate = subDays(endDate, 29);
+            startDate = startOfMonth(endDate);
     }
+    
+    const filteredCommits = commits.filter(commit => {
+        const commitDate = new Date(commit.commit.author.date);
+        return commitDate >= startDate && commitDate <= endDate;
+    });
 
     const dateInterval = eachDayOfInterval({ start: startDate, end: endDate });
-    
     const dateMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
     
-    const contributorMap = new Map<string, { name: string; avatar_url: string; totalCommits: number; commits: Map<string, number> }>();
+    filteredCommits.forEach(commit => {
+        const commitDateString = format(new Date(commit.commit.author.date), 'yyyy-MM-dd');
+        if (dateMap.has(commitDateString)) {
+            dateMap.set(commitDateString, (dateMap.get(commitDateString) || 0) + 1);
+        }
+    });
     
-    // Calculate totals and metadata for all contributors across all commits
+    const allCommitsChartData = Array.from(dateMap.entries()).map(([date, commits]) => ({
+        date: format(new Date(date), 'MMM dd'),
+        commits
+    })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    const contributorMap = new Map<string, { name: string; avatar_url: string; totalCommits: number; }>();
+    
     commits.forEach(commit => {
         const author = commit.author;
         if (author) {
@@ -111,41 +120,17 @@ export default function Home() {
                     name: commit.commit.author.name,
                     avatar_url: author.avatar_url,
                     totalCommits: 0,
-                    commits: new Map() // Start with an empty map for daily commits
                 });
             }
             const contributor = contributorMap.get(author.login)!;
             contributor.totalCommits += 1;
-            
-            // Also populate the initial daily commits map for all time
-            const commitDateString = format(new Date(commit.commit.author.date), 'yyyy-MM-dd');
-            contributor.commits.set(commitDateString, (contributor.commits.get(commitDateString) || 0) + 1);
         }
     });
-
-
-    // Then, filter and populate date-specific maps for the selected time range
-    const filteredDateMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
-    
-    commits.forEach(commit => {
-        const commitDate = new Date(commit.commit.author.date);
-        const commitDateString = format(commitDate, 'yyyy-MM-dd');
-        
-        if (filteredDateMap.has(commitDateString)) {
-            filteredDateMap.set(commitDateString, (filteredDateMap.get(commitDateString) || 0) + 1);
-        }
-    });
-    
-    const allCommits = Array.from(filteredDateMap.entries()).map(([date, commits]) => ({
-        date: format(new Date(date), 'MMM dd'),
-        commits
-    })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     const contributors: Contributor[] = Array.from(contributorMap.entries()).map(([login, data]) => {
         const dailyCommitsMap = new Map(dateInterval.map(d => [format(d, 'yyyy-MM-dd'), 0]));
         
-        // Filter contributor's commits for the selected date range
-        commits.forEach(commit => {
+        filteredCommits.forEach(commit => {
             if (commit.author?.login === login) {
                 const commitDateString = format(new Date(commit.commit.author.date), 'yyyy-MM-dd');
                 if (dailyCommitsMap.has(commitDateString)) {
@@ -168,7 +153,7 @@ export default function Home() {
         };
     }).sort((a, b) => b.totalCommits - a.totalCommits);
 
-    return { allCommits, contributors };
+    return { allCommits: allCommitsChartData, contributors };
   }, [commits, timeRange]);
 
 
@@ -326,9 +311,7 @@ export default function Home() {
                             <CardDescription>An overview of commit activity.</CardDescription>
                         </div>
                          <Tabs value={timeRange} onValueChange={setTimeRange}>
-                            <TabsList className="grid w-full grid-cols-5 h-auto">
-                                <TabsTrigger value="7d">7 Days</TabsTrigger>
-                                <TabsTrigger value="30d">30 Days</TabsTrigger>
+                            <TabsList className="grid w-full grid-cols-3 h-auto">
                                 <TabsTrigger value="this_week">This Week</TabsTrigger>
                                 <TabsTrigger value="this_month">This Month</TabsTrigger>
                                 <TabsTrigger value="all_time">All Time</TabsTrigger>
