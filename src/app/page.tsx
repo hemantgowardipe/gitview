@@ -259,13 +259,13 @@ export default function Home() {
   return (
     <div className="flex flex-col items-center min-h-screen p-4 md:p-8">
       <header className="w-full max-w-5xl mb-10 text-center relative">
-         <div className="absolute -top-10 -left-10 w-40 h-40 bg-primary/10 rounded-full blur-3xl -z-10"></div>
+         <div className="absolute -top-10 -left-10 w-40 h-40 bg-primary/5 rounded-full blur-3xl -z-10"></div>
          <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-secondary/20 rounded-full blur-3xl -z-10"></div>
         <div className="flex items-center justify-center gap-4 mb-2">
-          <div className="p-3 bg-primary/10 rounded-lg">
+          <div className="p-3 bg-card border rounded-lg">
             <GitBranch className="w-10 h-10 text-primary" />
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold font-headline bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
+          <h1 className="text-4xl md:text-5xl font-bold font-headline">
             GitView
           </h1>
         </div>
@@ -273,7 +273,7 @@ export default function Home() {
       </header>
       
       <main className="w-full max-w-5xl">
-        <Card className="shadow-lg bg-card/70 backdrop-blur-sm border-border/50">
+        <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="font-headline text-2xl">Select Repository</CardTitle>
             <CardDescription>Enter a public GitHub repository URL to visualize its commit history.</CardDescription>
@@ -303,7 +303,7 @@ export default function Home() {
         </Card>
         
         {(isFetchingCommits || repoInfo) && (
-            <Card className="mt-8 bg-card/70 backdrop-blur-sm border-border/50">
+            <Card className="mt-8 shadow-sm">
                 <CardHeader>
                     <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
                         <div>
@@ -326,17 +326,17 @@ export default function Home() {
                                 <ComposedChart data={chartData?.allCommits} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
                                     <defs>
                                         <linearGradient id="colorCommits" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
+                                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4}/>
                                             <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
+                                    <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
                                     <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
                                     <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} allowDecimals={false} />
                                     <Tooltip
                                         content={({ active, payload, label }) =>
                                         active && payload && payload.length ? (
-                                            <div className="p-2 bg-background/90 border border-border/50 rounded-lg shadow-lg">
+                                            <div className="p-2 bg-background border border-border rounded-lg shadow-lg">
                                                 <p className="font-bold text-base">{`${label}`}</p>
                                                 <p className="text-sm text-primary">{`Commits: ${payload[0].value}`}</p>
                                             </div>
@@ -353,7 +353,7 @@ export default function Home() {
                         )
                     )}
                 </CardContent>
-                <CardFooter className="flex flex-col items-start gap-4 pt-4 border-t border-border/50">
+                <CardFooter className="flex flex-col items-start gap-4 pt-4 border-t">
                      <h3 className="text-lg font-headline">All Contributors</h3>
                      {isFetchingCommits ? (
                         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -362,7 +362,7 @@ export default function Home() {
                      ) : (
                         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
                              {chartData && chartData.contributors.length > 0 ? chartData.contributors.map(c => (
-                                <Card key={c.login} className="w-full bg-muted/30">
+                                <Card key={c.login} className="w-full bg-background">
                                     <CardHeader className="flex flex-row items-center gap-4 p-4">
                                         <Avatar>
                                             <AvatarImage src={c.avatar_url} alt={c.login} />
@@ -409,15 +409,15 @@ export default function Home() {
         {commits.length > 0 && !isFetchingCommits && (
           <div className="mt-12">
             <h2 className="text-3xl font-bold text-center mb-8 font-headline">Commit History</h2>
-            <div className="relative pl-6 sm:pl-8 border-l-2 border-dashed border-primary/20">
+            <div className="relative pl-6 sm:pl-8 border-l-2 border-dashed border-border">
               {commits.map((commit, index) => (
                 <div key={commit.sha} className="relative mb-8">
                   <div className="absolute top-5 -left-[1.7rem] sm:-left-[2.2rem] transform">
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 bg-background flex items-center justify-center rounded-full">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 bg-background flex items-center justify-center rounded-full border">
                         <GitCommit className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
                     </div>
                   </div>
-                  <Card className="ml-4 sm:ml-6 hover:shadow-2xl hover:border-primary/50 transition-all duration-300 bg-card/50 backdrop-blur-sm">
+                  <Card className="ml-4 sm:ml-6 hover:shadow-md hover:border-primary/50 transition-all duration-300">
                     <CardHeader className="pb-4">
                       <div className="flex justify-between items-start">
                         <div className="flex items-center gap-3">
@@ -440,7 +440,7 @@ export default function Home() {
                     <CardContent>
                       <p className="font-medium text-lg text-foreground/90">{commit.commit.message.split('\n')[0]}</p>
                       {commit.commit.message.split('\n').slice(1).join('\n').trim() && (
-                        <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap font-mono border-l-2 border-border/50 pl-4 py-2 bg-black/10 rounded-r-md">
+                        <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap font-mono border-l-2 pl-4 py-2 bg-muted/50 rounded-r-md">
                           {commit.commit.message.split('\n').slice(1).join('\n')}
                         </p>
                       )}
@@ -459,7 +459,7 @@ export default function Home() {
         )}
 
         <AlertDialog open={!!selectedCommit} onOpenChange={(open) => !open && setSelectedCommit(null)}>
-          <AlertDialogContent className="max-w-2xl bg-background/80 backdrop-blur-md">
+          <AlertDialogContent className="max-w-2xl">
             <AlertDialogHeader>
               <AlertDialogTitle className="font-headline text-2xl flex items-center gap-3">
                 <Wand2 className="text-primary"/> AI Commit Message Rewrite
@@ -477,7 +477,7 @@ export default function Home() {
               <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2 -mr-2">
                 <div>
                   <h3 className="font-semibold mb-2 text-muted-foreground">Original Message</h3>
-                  <div className="p-4 rounded-md border bg-muted/30 text-sm whitespace-pre-wrap font-mono">{rewriteData.original}</div>
+                  <div className="p-4 rounded-md border bg-muted/50 text-sm whitespace-pre-wrap font-mono">{rewriteData.original}</div>
                 </div>
                 <div>
                   <div className="flex justify-between items-center mb-2">
