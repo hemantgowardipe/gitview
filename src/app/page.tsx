@@ -60,8 +60,7 @@ export default function Home() {
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
   
-  const [timeRange, setTimeRange] = useState('this_month');
-
+  const [timeRange, setTimeRange] = useState('all_time');
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
